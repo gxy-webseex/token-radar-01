@@ -399,6 +399,39 @@
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
+  // One or many live-token comparables, in words: the drawer names the count it prices from.
+  function pluralComparables(n) {
+    return n === 1 ? '1 live-token comparable' : n + ' live-token comparables';
+  }
+
+  // One comparable as one line of the priced-against list: its name, its TVL, the multiple it trades at.
+  function comparableRow(c) {
+    return el('div', null,
+      el('span', { text: c.name }),
+      el('b', { class: 'num', text: fmtUsd(c.tvl_usd) + ' · ' + fmtMult(c.multiple) })
+    );
+  }
+
+  // The priced-against section of the detail drawer: the trading protocols whose market caps
+  // set the category multiple this row is priced with, largest TVL first, with the median the
+  // row actually uses. A category with no trading protocols says so and names the overall
+  // median it falls back to, so the multiple is never a bare number.
+  function pricedAgainstSection(row, calib) {
+    var category = row.category || 'Other';
+    var lines = [];
+    if (calib && calib.top_comparables && calib.top_comparables.length > 0) {
+      lines.push(el('p', { class: 'sub', text: 'The largest trading protocols in the ' + category + ' category, by TVL. Their market caps are the comparables the multiple comes from.' }));
+      lines.push(el('p', { class: 'sub', text: 'This row is priced with the ' + category + ' multiple of ' + fmtMult(row.category_multiple) + ': the category median of ' + fmtMult(calib.median_multiple) + ' over ' + pluralComparables(calib.comparables) + ', shrunk toward the overall median of ' + fmtMult(DATA.calibration.overall_median) + '.' }));
+      lines.push(el('div', { class: 'equation' }, calib.top_comparables.map(comparableRow)));
+    } else {
+      lines.push(el('p', { class: 'sub', text: 'The ' + category + ' category has no live-token comparables, so this row takes the overall median multiple of ' + fmtMult(DATA.calibration.overall_median) + '.' }));
+    }
+    return el('section', { class: 'detail-section' },
+      el('h3', { text: 'Priced against' }),
+      lines
+    );
+  }
+
   function openDetail(slug) {
     var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
     if (!row) return;
@@ -430,6 +463,7 @@
       ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': ' + (calib ? 'the ' + (row.category || 'Other') + ' category has ' + calib.comparables + ' live-token comparables with a median multiple of ' + fmtMult(calib.median_multiple) + ', shrunk to ' + fmtMult(row.category_multiple) + '. ' : 'the category has no live-token comparables, so it takes the overall median ' + DATA.calibration.overall_median + 'x. ') + 'The page recomputes this row as ' + fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
+    dialog.appendChild(pricedAgainstSection(row, calib));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
