@@ -19,6 +19,10 @@
 // Age is the time since the protocol was first listed, the best record of how long it has run with
 // no token; an unlisted age uses 365 days. Growth is dampened and clamped because a one-week spike
 // is usually a listing artefact, not a trend. Chain breadth is a small premium for distribution.
+//
+// The drawer names the price: each category's five largest live-token comparables ride on the
+// calibration as top_comparables, so a reader can check the multiple against the trading
+// protocols that set it. The list is the calibration's own evidence, not a second data source.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -83,6 +87,16 @@ export interface CategoryCalibration {
   category: string;
   comparables: number;
   median_multiple: number | null;
+  multiple: number;
+  top_comparables?: CategoryComparable[];
+}
+
+/** One live-token comparable the calibration prices a category from: its name, its TVL, and the
+ *  market-cap-to-TVL multiple it trades at. The drawer names these so the multiple a row is
+ *  priced with is traceable to the trading protocols that set it, not a bare number. */
+export interface CategoryComparable {
+  name: string;
+  tvl_usd: number;
   multiple: number;
 }
 
@@ -249,6 +263,34 @@ export function calibrateComparables(snapshot: Snapshot, model: ModelConstants =
     })
     .sort((a, b) => b.comparables - a.comparables || (a.category < b.category ? -1 : a.category > b.category ? 1 : 0));
   return { comparable_count: comparables.length, overall_median: round4(overall), categories };
+}
+
+/** How many comparables name the price of one category in the drawer. */
+export const TOP_COMPARABLES = 5;
+
+/**
+ * The priced-against list: the live-token comparables the calibration already uses, grouped by
+ * category and largest TVL first, five at most per category. The list is the calibration's own
+ * evidence — a reader of the drawer can check the multiple against the trading protocols that
+ * set it, and a category with one comparable says so instead of hiding behind a median. The
+ * multiple each entry carries is its market cap over its TVL, rounded the way the calibration
+ * rounds; the row's own multiple is the category median shrunk toward the overall median.
+ */
+export function topComparables(snapshot: Snapshot): Map<string, CategoryComparable[]> {
+  const byCategory = new Map<string, CategoryComparable[]>();
+  const priced = snapshot.protocols.filter((p) => p.tvl_usd > 0 && p.mcap_usd !== null && p.mcap_usd > 0);
+  for (const p of priced) {
+    const key = p.category ?? 'Other';
+    const entry: CategoryComparable = { name: p.name, tvl_usd: p.tvl_usd, multiple: round4(p.mcap_usd! / p.tvl_usd) };
+    const list = byCategory.get(key);
+    if (list === undefined) byCategory.set(key, [entry]);
+    else list.push(entry);
+  }
+  for (const list of byCategory.values()) {
+    list.sort((a, b) => b.tvl_usd - a.tvl_usd || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    list.splice(TOP_COMPARABLES);
+  }
+  return byCategory;
 }
 
 /** The multiple the model applies to one category: its calibration, or the overall median. */
@@ -580,6 +622,10 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const calibration = calibrateComparables(snapshot, model);
+  // The priced-against list rides on the calibration, so the dashboard's drawer can name the
+  // trading protocols each category's multiple comes from without a second data source.
+  const pricedAgainst = topComparables(snapshot);
+  for (const c of calibration.categories) c.top_comparables = pricedAgainst.get(c.category) ?? [];
   const board = buildBoard(snapshot, calibration, model);
   const live = liveRows(snapshot);
   const setAside = setAsideRows(snapshot);
